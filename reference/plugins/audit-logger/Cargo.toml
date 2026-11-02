@@ -29,7 +29,7 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-praxis-policy-core = { workspace = true }
+praxis-policy-core = { workspace = true, features = ["crypto-sha2"] }
 
 async-trait = { workspace = true }
 chrono      = { workspace = true }

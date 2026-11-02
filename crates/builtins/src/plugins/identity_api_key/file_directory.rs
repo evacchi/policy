@@ -359,7 +359,7 @@ impl FileDirectory {
     ///
     /// # Errors
     ///
-    /// [`DirectoryError::Digest`] when the platform OpenSSL cannot hash. The
+    /// [`DirectoryError::Digest`] when the selected provider cannot hash. The
     /// lookup is refused rather than answered as an unknown credential.
     fn digest(&self, presented: &PresentedKey) -> Result<String, DirectoryError> {
         match self.config.index {

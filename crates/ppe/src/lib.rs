@@ -53,6 +53,8 @@
 //! # Features
 //!
 //! No plugins are on by default (`praxis-policy` alone is the engine).
+//! SHA-2 is the normal digest provider. FIPS consumers disable default features
+//! and select `api-key-fips` to use system OpenSSL without compiling SHA-2.
 //! `builtins` enables every bundled extension, including the Valkey session
 //! store; or pick a granular subset (`jwt`, `api-key`, `oauth`, `elicitation-ciba`,
 //! `cedar`, `cel`, `opa`, `valkey`, `secrets-vault`). Any of them brings in the registration
@@ -142,7 +144,7 @@ pub use praxis_policy_builtins::plugins::delegator_vault::{
 pub use praxis_policy_builtins::plugins::elicitation_ciba::{
     CibaApproverFactory, KIND as CIBA_KIND,
 };
-#[cfg(feature = "api-key")]
+#[cfg(feature = "_api-key")]
 pub use praxis_policy_builtins::plugins::identity_api_key::{
     ApiKeyIdentityFactory, KIND as API_KEY_KIND,
 };
@@ -219,7 +221,7 @@ use praxis_policy_builtins::plugins::delegator_oauth as oauth_builtin;
 use praxis_policy_builtins::plugins::delegator_vault as vault_delegator_builtin;
 #[cfg(feature = "elicitation-ciba")]
 use praxis_policy_builtins::plugins::elicitation_ciba as ciba_builtin;
-#[cfg(feature = "api-key")]
+#[cfg(feature = "_api-key")]
 use praxis_policy_builtins::plugins::identity_api_key as api_key_builtin;
 #[cfg(feature = "jwt")]
 use praxis_policy_builtins::plugins::identity_jwt as jwt_builtin;
@@ -231,7 +233,7 @@ use praxis_policy_builtins::plugins::ratelimit as ratelimit_builtin;
 #[cfg(feature = "_builtin")]
 register_builtins! {
     feature "jwt"                => jwt_builtin::JwtIdentityFactory,
-    feature "api-key"            => api_key_builtin::ApiKeyIdentityFactory,
+    feature "_api-key"           => api_key_builtin::ApiKeyIdentityFactory,
     feature "oauth"              => oauth_builtin::OAuthDelegatorFactory,
     feature "delegator-vault"    => vault_delegator_builtin::VaultDelegatorFactory,
     feature "elicitation-ciba"   => ciba_builtin::CibaApproverFactory,
@@ -316,9 +318,8 @@ pub fn warn_experimental_features() {
 ///
 /// ```
 /// let crypto = praxis_policy::compiled_crypto();
-/// // The engine hashes session ids through the platform OpenSSL in every
-/// // build, so that entry is always present.
-/// assert!(crypto.iter().any(|dep| dep.name == "openssl"));
+/// // Provider entries describe the digest dependencies selected by features.
+/// assert!(!crypto.is_empty());
 /// ```
 pub fn compiled_crypto() -> Vec<CryptoDependency> {
     let mut crypto = praxis_policy_core::crypto::compiled_crypto();
@@ -482,7 +483,7 @@ mod tests {
     fn every_enabled_builtin_resolves_its_kind() {
         let expected = [
             (cfg!(feature = "jwt"), "identity/jwt"),
-            (cfg!(feature = "api-key"), "identity/api-key"),
+            (cfg!(feature = "_api-key"), "identity/api-key"),
             (cfg!(feature = "oauth"), "delegator/oauth"),
             (cfg!(feature = "delegator-vault"), "delegator/vault"),
             (cfg!(feature = "elicitation-ciba"), "elicitation/ciba"),

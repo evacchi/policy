@@ -135,7 +135,7 @@ fn subject_scoped(
 /// caller must fail the request closed: an error here is not "no
 /// session", and treating it as one would run the request without
 /// hydration, taint and persistence.
-pub fn resolve_session(
+pub fn try_resolve_session(
     ext: &Extensions,
 ) -> Result<Option<(String, SessionSource)>, SessionResolveError> {
     // The authenticated subject, populated by the identity resolvers
@@ -202,6 +202,17 @@ pub fn resolve_session(
     Ok(None)
 }
 
+/// Resolve a session without exposing provider failures.
+///
+/// Use [`try_resolve_session`] when a provider failure must be distinguished
+/// from the absence of a session. Request execution uses the fallible helper.
+pub fn resolve_session(ext: &Extensions) -> Option<(String, SessionSource)> {
+    match try_resolve_session(ext) {
+        Ok(session) => session,
+        Err(_) => None,
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::field_reassign_with_default,
@@ -242,7 +253,7 @@ mod tests {
     // The infallible shapes the tests were written against: a digest
     // failure here is a bug in the test, not a case under test.
     fn resolve(ext: &Extensions) -> Option<(String, SessionSource)> {
-        super::resolve_session(ext).unwrap()
+        super::try_resolve_session(ext).unwrap()
     }
 
     fn scoped(subject_id: Option<&str>, raw: &str) -> Option<String> {

@@ -17,7 +17,7 @@
 #[cfg(feature = "jwt")]
 pub mod identity_jwt;
 
-#[cfg(feature = "api-key")]
+#[cfg(any(feature = "api-key", feature = "api-key-fips"))]
 pub mod identity_api_key;
 
 #[cfg(feature = "oauth")]

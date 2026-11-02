@@ -27,9 +27,9 @@ publish = false
 
 [dependencies]
 praxis-policy-builtins = { workspace = true, features = ["cedar", "cel", "opa", "jwt"] }
-praxis-policy-core = { workspace = true }
+praxis-policy-core = { workspace = true, features = ["crypto-sha2"] }
 praxis-policy-apl-core = { workspace = true }
-praxis-policy-apl-runtime = { workspace = true }
+praxis-policy-apl-runtime = { workspace = true, features = ["crypto-sha2"] }
 async-trait = { workspace = true }
 serde_yaml = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }

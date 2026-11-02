@@ -11,13 +11,21 @@
 use praxis_policy::CryptoSource;
 
 #[test]
-fn engine_digests_use_system_openssl() {
+fn engine_digests_use_the_selected_provider() {
     let crypto = praxis_policy::compiled_crypto();
+    #[cfg(feature = "fips-crypto")]
     assert!(
         crypto
             .iter()
             .any(|dep| dep.name == "openssl" && dep.source == CryptoSource::SystemOpenssl),
-        "the engine hashes session ids through the platform OpenSSL: {crypto:?}",
+        "FIPS-selected engine hashes use platform OpenSSL: {crypto:?}",
+    );
+    #[cfg(not(feature = "fips-crypto"))]
+    assert!(
+        crypto
+            .iter()
+            .any(|dep| dep.name == "sha2" && dep.source == CryptoSource::Bundled),
+        "normal engine hashes use RustCrypto SHA-256: {crypto:?}",
     );
 }
 
@@ -61,7 +69,30 @@ fn builtin_reports_are_aggregated() {
     ))
 ))]
 #[test]
-fn api_key_only_reports_no_bundled_crypto() {
+fn normal_api_key_reports_bundled_sha2() {
+    let crypto = praxis_policy::compiled_crypto();
+    assert!(
+        crypto
+            .iter()
+            .any(|dep| dep.name == "sha2" && dep.used_by.contains("api-key")),
+        "the normal API-key selection uses RustCrypto SHA-256: {crypto:?}",
+    );
+}
+
+#[cfg(all(
+    feature = "api-key-fips",
+    not(feature = "crypto-sha2"),
+    not(any(
+        feature = "api-key",
+        feature = "jwt",
+        feature = "oauth",
+        feature = "delegator-vault",
+        feature = "valkey",
+        feature = "http-hyper"
+    ))
+))]
+#[test]
+fn fips_api_key_selection_reports_only_system_crypto() {
     let crypto = praxis_policy::compiled_crypto();
     assert!(
         crypto

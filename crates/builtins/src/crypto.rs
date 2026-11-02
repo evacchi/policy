@@ -20,7 +20,7 @@ use praxis_policy_core::crypto::CryptoDependency;
 /// ```
 /// let crypto = praxis_policy_builtins::compiled_crypto();
 /// // With no builtin features enabled, nothing is reported.
-/// # #[cfg(not(any(feature = "jwt", feature = "api-key", feature = "oauth", feature = "delegator-vault", feature = "valkey")))]
+/// # #[cfg(not(any(feature = "jwt", feature = "api-key", feature = "api-key-fips", feature = "oauth", feature = "delegator-vault", feature = "valkey")))]
 /// assert!(crypto.is_empty());
 /// ```
 pub fn compiled_crypto() -> Vec<CryptoDependency> {
@@ -30,6 +30,7 @@ pub fn compiled_crypto() -> Vec<CryptoDependency> {
     #[cfg_attr(
         not(any(
             feature = "api-key",
+            feature = "api-key-fips",
             feature = "jwt",
             feature = "oauth",
             feature = "delegator-vault",
@@ -42,6 +43,11 @@ pub fn compiled_crypto() -> Vec<CryptoDependency> {
     // a different predicate, and a table would hide that behind one more
     // indirection to check.
     #[cfg(feature = "api-key")]
+    crypto.push(CryptoDependency::bundled(
+        "sha2",
+        "praxis-policy-builtins api-key: credential digests",
+    ));
+    #[cfg(feature = "api-key-fips")]
     crypto.push(CryptoDependency::system_openssl(
         "openssl",
         "praxis-policy-builtins api-key: credential digests",
@@ -86,7 +92,7 @@ pub fn compiled_crypto() -> Vec<CryptoDependency> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "api-key")]
+    #[cfg(feature = "api-key-fips")]
     use praxis_policy_core::crypto::CryptoSource;
 
     /// Whatever is reported names its dependency, its user, and a source —
@@ -101,19 +107,24 @@ mod tests {
 
     #[cfg(feature = "api-key")]
     #[test]
-    fn api_key_reports_system_openssl_and_nothing_bundled() {
+    fn api_key_reports_bundled_sha2_by_default() {
+        assert!(
+            compiled_crypto()
+                .iter()
+                .any(|dep| dep.name == "sha2" && dep.used_by.contains("api-key")),
+            "the normal API-key feature uses RustCrypto SHA-256",
+        );
+    }
+
+    #[cfg(feature = "api-key-fips")]
+    #[test]
+    fn api_key_fips_reports_system_openssl() {
         let crypto = compiled_crypto();
         assert!(
             crypto
                 .iter()
                 .any(|dep| dep.name == "openssl" && dep.source == CryptoSource::SystemOpenssl),
-            "api-key digests go through the platform OpenSSL: {crypto:?}",
-        );
-        assert!(
-            !crypto
-                .iter()
-                .any(|dep| dep.name == "sha2" && dep.used_by.contains("api-key")),
-            "api-key must not pull bundled sha2: {crypto:?}",
+            "FIPS API-key digests use platform OpenSSL: {crypto:?}",
         );
     }
 }

@@ -204,7 +204,7 @@ impl ContentKey {
     /// Digest `bytes`, prefixed with the scheme and, for a keyed digest, the
     /// key id.
     ///
-    /// `None` when the platform OpenSSL cannot hash. Handled rather than
+    /// `None` when the selected provider cannot hash. Handled rather than
     /// asserted, since a panic here would take the request down over an
     /// audit field; the field is omitted instead, never filled with a
     /// different value.

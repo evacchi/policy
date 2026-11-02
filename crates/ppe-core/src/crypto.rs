@@ -87,24 +87,37 @@ impl CryptoDependency {
 
 /// The crypto this crate compiled with.
 ///
-/// Unconditional: payload provenance digests and the instruction digests
-/// the CMF bridge takes from here hash through the platform OpenSSL in
-/// every build.
+/// Reports the hash provider selected for payload provenance and instruction
+/// digests.
 ///
 /// # Examples
 ///
 /// ```
 /// let crypto = praxis_policy_core::crypto::compiled_crypto();
-/// assert!(crypto.iter().all(|dep| dep.name == "openssl"));
+/// assert!(crypto.iter().any(|dep| dep.name == "sha2" || dep.name == "openssl"));
 /// ```
 pub fn compiled_crypto() -> Vec<CryptoDependency> {
-    vec![CryptoDependency::system_openssl(
+    let mut crypto = Vec::new();
+    #[cfg(feature = "crypto-sha2")]
+    {
+        crypto.push(CryptoDependency::bundled(
+            "sha2",
+            "praxis-policy-core: payload provenance and instruction digests",
+        ));
+        crypto.push(CryptoDependency::bundled(
+            "hmac",
+            "praxis-policy-core: keyed payload provenance",
+        ));
+    }
+    #[cfg(feature = "fips-crypto")]
+    crypto.push(CryptoDependency::system_openssl(
         "openssl",
         "praxis-policy-core: payload provenance and instruction digests",
-    )]
+    ));
+    crypto
 }
 
-/// SHA-256 of `bytes`, via the platform OpenSSL.
+/// SHA-256 of `bytes` using the selected provider.
 ///
 /// Same digest the previous `RustCrypto` implementation produced, so
 /// digests recorded by an older build (audit provenance, instruction pins)
@@ -112,38 +125,60 @@ pub fn compiled_crypto() -> Vec<CryptoDependency> {
 ///
 /// # Errors
 ///
-/// When the system OpenSSL cannot hash, naming the failure. Callers that
+/// When the selected provider cannot hash, naming the failure. Callers that
 /// can fail closed should; callers writing an optional audit or pin field
 /// may omit it, but never substitute a different value.
 pub fn sha256(bytes: &[u8]) -> Result<[u8; 32], String> {
-    let digest = openssl::hash::hash(openssl::hash::MessageDigest::sha256(), bytes)
-        .map_err(|e| format!("system OpenSSL SHA-256 failed: {e}"))?;
-    digest
-        .as_ref()
-        .try_into()
-        .map_err(|error: std::array::TryFromSliceError| {
-            format!("system OpenSSL returned a SHA-256 digest that is not 32 bytes: {error}")
-        })
+    #[cfg(feature = "fips-crypto")]
+    {
+        let digest = openssl::hash::hash(openssl::hash::MessageDigest::sha256(), bytes)
+            .map_err(|e| format!("system OpenSSL SHA-256 failed: {e}"))?;
+        digest
+            .as_ref()
+            .try_into()
+            .map_err(|error: std::array::TryFromSliceError| {
+                format!("system OpenSSL returned a SHA-256 digest that is not 32 bytes: {error}")
+            })
+    }
+    #[cfg(not(feature = "fips-crypto"))]
+    {
+        use sha2::{Digest as _, Sha256};
+
+        Ok(Sha256::digest(bytes).into())
+    }
 }
 
-/// HMAC-SHA256 of `data` under `key`, via the platform OpenSSL.
+/// HMAC-SHA256 of `data` under `key` using the selected provider.
 ///
 /// Same bytes the previous `RustCrypto` implementation produced.
 ///
 /// # Errors
 ///
-/// When the system OpenSSL cannot initialize or run the MAC.
+/// When the selected provider cannot initialize or run the MAC.
 pub fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
-    let pkey =
-        openssl::pkey::PKey::hmac(key).map_err(|e| format!("system OpenSSL HMAC failed: {e}"))?;
-    let mut signer = openssl::sign::Signer::new(openssl::hash::MessageDigest::sha256(), &pkey)
-        .map_err(|e| format!("system OpenSSL HMAC failed: {e}"))?;
-    signer
-        .update(data)
-        .map_err(|e| format!("system OpenSSL HMAC failed: {e}"))?;
-    signer
-        .sign_to_vec()
-        .map_err(|e| format!("system OpenSSL HMAC failed: {e}"))
+    #[cfg(feature = "fips-crypto")]
+    {
+        let pkey = openssl::pkey::PKey::hmac(key)
+            .map_err(|e| format!("system OpenSSL HMAC failed: {e}"))?;
+        let mut signer = openssl::sign::Signer::new(openssl::hash::MessageDigest::sha256(), &pkey)
+            .map_err(|e| format!("system OpenSSL HMAC failed: {e}"))?;
+        signer
+            .update(data)
+            .map_err(|e| format!("system OpenSSL HMAC failed: {e}"))?;
+        signer
+            .sign_to_vec()
+            .map_err(|e| format!("system OpenSSL HMAC failed: {e}"))
+    }
+    #[cfg(not(feature = "fips-crypto"))]
+    {
+        use hmac::{Hmac, KeyInit as _, Mac as _};
+        use sha2::Sha256;
+
+        let mut mac = Hmac::<Sha256>::new_from_slice(key)
+            .map_err(|error| format!("RustCrypto HMAC key was rejected: {error}"))?;
+        mac.update(data);
+        Ok(mac.finalize().into_bytes().to_vec())
+    }
 }
 
 #[cfg(test)]

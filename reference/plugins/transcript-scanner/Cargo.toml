@@ -28,7 +28,7 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-praxis-policy-core = { workspace = true }
+praxis-policy-core = { workspace = true, features = ["crypto-sha2"] }
 
 async-trait = { workspace = true }
 serde       = { workspace = true }
@@ -36,7 +36,7 @@ serde_json  = { workspace = true }
 regex       = { workspace = true }
 
 [dev-dependencies]
-praxis-policy-apl-runtime = { workspace = true }
+praxis-policy-apl-runtime = { workspace = true, features = ["crypto-sha2"] }
 
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 

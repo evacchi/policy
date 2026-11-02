@@ -173,20 +173,21 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- **Digests now run on the platform OpenSSL.** API-key indexing and caching,
-  session-id resolution, decision-cache keys, payload provenance, and
-  instruction digests hash through dynamically linked system OpenSSL instead
-  of RustCrypto `sha2`/`hmac`, so an API-key-only selection compiles no bundled
-  crypto. Digest values are unchanged: key files, persisted session keys, and
-  recorded provenance digests keep resolving. `openssl` never enables
-  `vendored`. Consumers need an operating system OpenSSL; see the deployment
-  documentation's crypto provenance section.
+- **Digest providers are selectable.** Normal builds use RustCrypto
+  `sha2`/`hmac`. FIPS consumers disable dependency defaults and select
+  `api-key-fips`, which routes API-key indexing and caching, session-id
+  resolution, decision-cache keys, payload provenance, and instruction
+  digests through dynamically linked system OpenSSL. Digest values are
+  unchanged. `openssl` never enables `vendored`; FIPS consumers need an
+  operating system OpenSSL. See the deployment documentation's crypto
+  provenance section.
 - **Digest failures fail closed where they decide security outcomes.**
-  `resolve_session` now returns `Result`, and a session id that cannot be
-  derived fails the request (`SessionStoreError::SessionId`) rather than
-  running without hydration, taint, and persistence. API-key lookups refuse
-  with `DirectoryError::Digest`. The decision cache degrades to evaluating
-  uncached; the instruction digest omits its attribute with a warning.
+  Request execution uses a fallible session resolver, and a session id that
+  cannot be derived fails the request rather than running without hydration,
+  taint, and persistence. The existing infallible resolver remains available
+  on normal builds. API-key lookups refuse with `DirectoryError::Digest`. The
+  decision cache degrades to evaluating uncached; the instruction digest omits
+  its attribute with a warning.
 - `praxis-policy-builtins` now depends on `praxis-policy-core`
   unconditionally, so the capability report exists in every feature
   combination. The PDP-only features still keep their apl-core-only graphs

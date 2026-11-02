@@ -152,9 +152,8 @@ sha2 = "0.11"
 # because a statically linked OpenSSL is bundled crypto and fails the same
 # FIPS graph check that `sha2` fails.
 openssl = "0.10"
-# Keyed digests: the OAuth PKCE verifier and cache key. Moves with `sha2`
-# above, since both have to agree on `digest`. Audit content provenance
-# moved to the platform OpenSSL with the rest of the engine's digests.
+# Keyed digests: normal-provider audit provenance and the OAuth cache key.
+# Moves with `sha2` above, since both have to agree on `digest`.
 hmac = "0.13"
 # ECDSA P-256 for the OCSF audit sink's DSSE signatures. RustCrypto's `ecdsa`
 # signs per RFC 6979, so the same key and bytes always give the same
@@ -175,12 +174,12 @@ limitador-cel = { package = "cel", version = "0.12.0" }
 # The keys are package names, which still carry the engine's previous naming.
 # Renaming them is a manifest change across every crate and lands separately, so
 # that the import stays a move and the rename stays a rename.
-praxis-policy-core = { path = "crates/ppe-core", version = "0.5.0" }
+praxis-policy-core = { path = "crates/ppe-core", version = "0.5.0", default-features = false }
 praxis-policy-orchestration = { path = "crates/ppe-orchestration", version = "0.5.0" }
 praxis-policy-apl-core = { path = "crates/ppe-apl-core", version = "0.5.0" }
-praxis-policy-apl-cmf = { path = "crates/ppe-apl-cmf", version = "0.5.0" }
-praxis-policy-apl-runtime = { path = "crates/ppe-apl-runtime", version = "0.5.0" }
-praxis-policy-builtins = { path = "crates/builtins", version = "0.5.0" }
+praxis-policy-apl-cmf = { path = "crates/ppe-apl-cmf", version = "0.5.0", default-features = false }
+praxis-policy-apl-runtime = { path = "crates/ppe-apl-runtime", version = "0.5.0", default-features = false }
+praxis-policy-builtins = { path = "crates/builtins", version = "0.5.0", default-features = false }
 praxis-policy = { path = "crates/ppe", version = "0.5.0" }
 # Unpublished, so path only.
 praxis-policy-test-utils = { path = "tests/utils" }

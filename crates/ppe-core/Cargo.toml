@@ -19,6 +19,10 @@ categories.workspace = true
 rust-version.workspace = true
 
 [features]
+default = ["crypto-sha2"]
+crypto-sha2 = ["dep:hmac", "dep:sha2"]
+fips-crypto = ["dep:openssl"]
+
 # Test doubles for the seams a host normally fills —
 # `http_testing::FakeTransport` and `fault_testing` (a plugin that panics,
 # errors, or hangs on demand).
@@ -55,11 +59,10 @@ hashbrown = { workspace = true }
 # `catch_unwind` on the audit-sink future, so a panicking sink cannot unwind
 # the request whose verdict it is only observing.
 futures = { workspace = true }
-# Audit content provenance digests and `llm.input.instructions_digest`, via
-# the platform OpenSSL: only a keyed digest of a payload is ever recorded,
-# never the payload. System OpenSSL rather than RustCrypto `sha2`/`hmac` so
-# an API-key-only build carries no bundled crypto; never `vendored`.
-openssl = { workspace = true }
+# Audit content provenance and instruction digests use the selected provider.
+sha2 = { workspace = true, optional = true }
+hmac = { workspace = true, optional = true }
+openssl = { workspace = true, optional = true }
 arc-swap = { workspace = true }
 wildmatch = { workspace = true }
 chrono = { workspace = true }

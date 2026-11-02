@@ -17,16 +17,21 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["crypto-sha2"]
+crypto-sha2 = ["dep:sha2", "praxis-policy-core/crypto-sha2"]
+fips-crypto = ["praxis-policy-core/fips-crypto"]
+
 [dependencies]
 praxis-policy-apl-core = { workspace = true }
-praxis-policy-core = { workspace = true }
+praxis-policy-core = { workspace = true, default-features = false }
 serde_json = { workspace = true }
 # Only to render `WorkloadIdentity.attested_at` in a canonical, orderable form.
 # The typed value is core's; the formatting choice is the bridge's.
 chrono = { workspace = true }
-# `llm.input.instructions_digest` is taken from core's platform-OpenSSL
-# digest; no crypto dependency of this crate's own.
+# `llm.input.instructions_digest` uses the selected provider through core.
 tracing = { workspace = true }
+sha2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

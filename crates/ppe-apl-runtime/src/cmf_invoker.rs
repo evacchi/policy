@@ -179,7 +179,7 @@ where
         // header → identity-derived → none). Snapshotted before
         // hydration so the lookup is independent of the COW write
         // that hydration performs.
-        let session_id: Option<String> = crate::session_resolver::resolve_session(&extensions)
+        let session_id: Option<String> = crate::session_resolver::try_resolve_session(&extensions)
             .map_err(|error| SessionStoreError::Backend(error.to_string()))?
             .map(|(sid, _src)| sid);
 

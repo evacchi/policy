@@ -96,7 +96,7 @@ pub fn extract_llm_request(req: &LlmRequestParts, bag: &mut AttributeBag) {
     if let Some(v) = req.stream {
         bag.set(BAG_LLM_STREAM, v);
     }
-    if let Some(digest) = instruction_digest(&req.instructions) {
+    if let Some(digest) = try_instruction_digest(&req.instructions) {
         bag.set(BAG_LLM_INSTRUCTIONS_DIGEST, digest);
     } else {
         tracing::warn!(
@@ -112,11 +112,34 @@ pub fn extract_llm_request(req: &LlmRequestParts, bag: &mut AttributeBag) {
 /// then for each instruction a one-byte role (`0` system, `1` developer),
 /// a big-endian `u64` byte length, and the exact UTF-8 text bytes.
 ///
-/// `None` when the platform OpenSSL cannot hash. The caller omits the
+/// `None` when the selected provider cannot hash. The caller omits the
 /// attribute rather than recording a value a pin could never match; a
 /// policy pinning the digest then fails to match, which is the fail-closed
 /// side.
-pub fn instruction_digest(instructions: &[LlmInstruction]) -> Option<String> {
+pub fn try_instruction_digest(instructions: &[LlmInstruction]) -> Option<String> {
+    let digest = match sha256(&instruction_preimage(instructions)) {
+        Ok(digest) => digest,
+        Err(_) => return None,
+    };
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    Some(format!("sha256-v1:{hex}"))
+}
+
+/// Digest ordered instructions with RustCrypto SHA-256.
+///
+/// Available when `crypto-sha2` is enabled. Use
+/// [`try_instruction_digest`] to use the selected provider and handle errors.
+#[cfg(feature = "crypto-sha2")]
+#[must_use]
+pub fn instruction_digest(instructions: &[LlmInstruction]) -> String {
+    use sha2::{Digest as _, Sha256};
+
+    let digest = Sha256::digest(instruction_preimage(instructions));
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("sha256-v1:{hex}")
+}
+
+fn instruction_preimage(instructions: &[LlmInstruction]) -> Vec<u8> {
     let mut preimage =
         Vec::with_capacity(24 + instructions.iter().map(|i| i.text.len() + 9).sum::<usize>());
     preimage.extend_from_slice(b"ppe.llm.instructions.v1\0");
@@ -138,9 +161,7 @@ pub fn instruction_digest(instructions: &[LlmInstruction]) -> Option<String> {
         );
         preimage.extend_from_slice(instruction.text.as_bytes());
     }
-    let digest = sha256(&preimage).ok()?;
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    Some(format!("sha256-v1:{hex}"))
+    preimage
 }
 
 #[cfg(test)]
@@ -211,7 +232,7 @@ mod tests {
         assert_eq!(
             bag.get_string("llm.input.instructions_digest"),
             Some(
-                instruction_digest(&parts.instructions)
+                try_instruction_digest(&parts.instructions)
                     .expect("digest")
                     .as_str()
             )
@@ -230,7 +251,7 @@ mod tests {
             text: text.into(),
         };
         let base = vec![system("ab"), developer("c")];
-        let digest = instruction_digest(&base).expect("digest");
+        let digest = try_instruction_digest(&base).expect("digest");
         assert!(digest.starts_with("sha256-v1:"));
         for changed in [
             vec![developer("ab"), developer("c")],
@@ -240,11 +261,11 @@ mod tests {
         ] {
             assert_ne!(
                 Some(digest.clone()),
-                instruction_digest(&changed),
+                try_instruction_digest(&changed),
                 "role, boundary, order or byte changes must change the digest"
             );
         }
-        assert_ne!(Some(digest), instruction_digest(&[]));
+        assert_ne!(Some(digest), try_instruction_digest(&[]));
     }
 
     #[test]

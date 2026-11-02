@@ -66,12 +66,17 @@ the enforced path for the operations you want mediated.
 
 ## Crypto provenance and FIPS hosts
 
-The engine's digests — API-key indexing and caching, session ids, decision
-cache keys, payload provenance — are computed by the **platform OpenSSL**,
-dynamically linked. No crypto is compiled into the binary for these paths:
-the `openssl` crate never enables its `vendored` feature, so the library the
-host's operating system provides (and configures, for example into FIPS mode)
-is the one that runs.
+Normal builds use RustCrypto SHA-256 and HMAC-SHA-256. A FIPS build selects the
+`api-key-fips` feature with dependency defaults disabled; this switches API-key
+indexing and caching, session ids, decision-cache keys, payload provenance,
+and instruction digests to platform OpenSSL. The `openssl` crate never enables
+its `vendored` feature, so the dynamically linked library supplied by the host
+operating system is the one that runs.
+
+For example, a FIPS consumer selects `praxis-policy` with
+`default-features = false` and `features = ["api-key-fips"]`. The ordinary
+`api-key` feature selects RustCrypto and must not be combined with
+`api-key-fips` for a FIPS binary.
 
 A deployment that must run under a FIPS enforcement therefore needs:
 

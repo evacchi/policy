@@ -10,19 +10,25 @@ use praxis_policy_core::crypto::CryptoDependency;
 
 /// The crypto this crate compiled with.
 ///
-/// Unconditional: session ids and decision-cache keys hash through the
-/// platform OpenSSL in every build of this crate, and no feature removes
-/// that edge.
+/// Reports the provider selected for session ids and decision-cache keys.
 ///
 /// # Examples
 ///
 /// ```
 /// let crypto = praxis_policy_apl_runtime::compiled_crypto();
-/// assert!(crypto.iter().any(|dep| dep.name == "openssl"));
+/// assert!(crypto.iter().any(|dep| dep.name == "sha2" || dep.name == "openssl"));
 /// ```
 pub fn compiled_crypto() -> Vec<CryptoDependency> {
-    vec![CryptoDependency::system_openssl(
+    let mut crypto = Vec::new();
+    #[cfg(feature = "crypto-sha2")]
+    crypto.push(CryptoDependency::bundled(
+        "sha2",
+        "praxis-policy-apl-runtime: session ids, decision cache keys",
+    ));
+    #[cfg(feature = "fips-crypto")]
+    crypto.push(CryptoDependency::system_openssl(
         "openssl",
         "praxis-policy-apl-runtime: session ids, decision cache keys",
-    )]
+    ));
+    crypto
 }

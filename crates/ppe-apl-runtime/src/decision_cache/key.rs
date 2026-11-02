@@ -9,13 +9,63 @@
 // mapping iteration order cannot change the digest: YAML maps, JSON
 // objects, and the bag are hashed in sorted-key order.
 
-use openssl::hash::{Hasher, MessageDigest};
+#[cfg(feature = "fips-crypto")]
+use openssl::hash::MessageDigest;
+#[cfg(not(feature = "fips-crypto"))]
+use sha2::{Digest as _, Sha256};
 
-/// The error every digest walk below propagates: the platform OpenSSL could
-/// not hash. A cache key that cannot be built means the call goes uncached,
-/// never that the decision fails or the request is served from a wrong entry.
+/// A cache key that cannot be built means the call goes uncached, never that
+/// the decision fails or the request is served from a wrong entry.
+#[cfg(feature = "fips-crypto")]
 fn digest_failed(e: openssl::error::ErrorStack) -> String {
     format!("system OpenSSL SHA-256 failed: {e}")
+}
+
+struct Hasher {
+    #[cfg(feature = "fips-crypto")]
+    inner: openssl::hash::Hasher,
+    #[cfg(not(feature = "fips-crypto"))]
+    inner: Sha256,
+}
+
+impl Hasher {
+    fn new() -> Result<Self, String> {
+        #[cfg(feature = "fips-crypto")]
+        let inner = openssl::hash::Hasher::new(MessageDigest::sha256()).map_err(digest_failed)?;
+        #[cfg(not(feature = "fips-crypto"))]
+        let inner = Sha256::new();
+        Ok(Self { inner })
+    }
+
+    fn update(&mut self, bytes: &[u8]) -> Result<(), String> {
+        #[cfg(feature = "fips-crypto")]
+        return self.inner.update(bytes).map_err(digest_failed);
+        #[cfg(not(feature = "fips-crypto"))]
+        {
+            self.inner.update(bytes);
+            Ok(())
+        }
+    }
+
+    fn finish(self) -> Result<[u8; 32], String> {
+        #[cfg(feature = "fips-crypto")]
+        {
+            let mut inner = self.inner;
+            let digest = inner.finish().map_err(digest_failed)?;
+            digest
+                .as_ref()
+                .try_into()
+                .map_err(|error: std::array::TryFromSliceError| {
+                    format!(
+                        "system OpenSSL returned a SHA-256 digest that is not 32 bytes: {error}"
+                    )
+                })
+        }
+        #[cfg(not(feature = "fips-crypto"))]
+        {
+            Ok(self.inner.finalize().into())
+        }
+    }
 }
 
 use praxis_policy_apl_core::attributes::{AttributeBag, AttributeValue};
@@ -44,22 +94,17 @@ impl CacheKey {
         bag: &AttributeBag,
         structured: &StructuredInput,
     ) -> Result<Self, String> {
-        let mut hasher = Hasher::new(MessageDigest::sha256()).map_err(digest_failed)?;
+        let mut hasher = Hasher::new()?;
         hash_dialect(&mut hasher, &call.dialect)?;
         hash_yaml(&mut hasher, &call.args)?;
         hash_bag(&mut hasher, bag)?;
         hash_structured(&mut hasher, structured)?;
-        let digest = hasher.finish().map_err(digest_failed)?;
-        Ok(Self(digest.as_ref().try_into().map_err(
-            |error: std::array::TryFromSliceError| {
-                format!("system OpenSSL returned a SHA-256 digest that is not 32 bytes: {error}")
-            },
-        )?))
+        Ok(Self(hasher.finish()?))
     }
 }
 
 fn upd(hasher: &mut Hasher, bytes: impl AsRef<[u8]>) -> Result<(), String> {
-    hasher.update(bytes.as_ref()).map_err(digest_failed)
+    hasher.update(bytes.as_ref())
 }
 
 fn hash_dialect(hasher: &mut Hasher, dialect: &PdpDialect) -> Result<(), String> {
@@ -184,10 +229,9 @@ fn hash_yaml(hasher: &mut Hasher, value: &serde_yaml::Value) -> Result<(), Strin
 }
 
 fn canonical_yaml_bytes(value: &serde_yaml::Value) -> Result<Vec<u8>, String> {
-    let mut hasher = Hasher::new(MessageDigest::sha256()).map_err(digest_failed)?;
+    let mut hasher = Hasher::new()?;
     hash_yaml(&mut hasher, value)?;
-    let digest = hasher.finish().map_err(digest_failed)?;
-    Ok(digest.to_vec())
+    Ok(hasher.finish()?.to_vec())
 }
 
 fn hash_structured(hasher: &mut Hasher, structured: &StructuredInput) -> Result<(), String> {

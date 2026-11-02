@@ -27,10 +27,23 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["crypto-sha2"]
+crypto-sha2 = [
+  "dep:sha2",
+  "praxis-policy-apl-cmf/crypto-sha2",
+  "praxis-policy-core/crypto-sha2",
+]
+fips-crypto = [
+  "dep:openssl",
+  "praxis-policy-apl-cmf/fips-crypto",
+  "praxis-policy-core/fips-crypto",
+]
+
 [dependencies]
 praxis-policy-apl-core = { workspace = true }
-praxis-policy-apl-cmf = { workspace = true }
-praxis-policy-core = { workspace = true }
+praxis-policy-apl-cmf = { workspace = true, default-features = false }
+praxis-policy-core = { workspace = true, default-features = false }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
@@ -38,13 +51,10 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-# SHA-256 for tier-3 (identity-derived) session ids and decision-cache keys,
-# via the platform OpenSSL. `DefaultHasher` is explicitly documented as
-# not-stable-across-Rust-versions; session keys persist across process
-# restarts (SessionStore), so we need an algorithmically fixed hash. System
-# OpenSSL rather than a RustCrypto `sha2` so a FIPS build hashes with the
-# library the host controls; never `vendored`.
-openssl = { workspace = true }
+# SHA-256 for session ids and decision-cache keys. The normal provider is
+# RustCrypto; `fips-crypto` switches to platform OpenSSL.
+sha2 = { workspace = true, optional = true }
+openssl = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde = { workspace = true }
