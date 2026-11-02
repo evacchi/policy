@@ -64,6 +64,46 @@ provider rather than through the policy path, unless you intend to apply policy
 to them. Otherwise model traffic is evaluated as if it were a tool call. Reserve
 the enforced path for the operations you want mediated.
 
+## Crypto provenance and FIPS hosts
+
+The engine's digests — API-key indexing and caching, session ids, decision
+cache keys, payload provenance — are computed by the **platform OpenSSL**,
+dynamically linked. No crypto is compiled into the binary for these paths:
+the `openssl` crate never enables its `vendored` feature, so the library the
+host's operating system provides (and configures, for example into FIPS mode)
+is the one that runs.
+
+A deployment that must run under a FIPS enforcement therefore needs:
+
+- an operating system OpenSSL built on the FIPS module path (RHEL/UBI 9 with
+  `openssl-fips-provider`, and equivalents), and
+- a feature selection whose remaining builtins carry no bundled crypto.
+  API-key identity is the verified selection. The JWT backend, the OAuth
+delegator, the Vault delegator, and the Valkey session store still hash with
+RustCrypto crates and are excluded from a FIPS build until they migrate.
+
+A host can check what a build actually compiled, rather than what it
+requested, with the facade's capability report:
+
+```rust
+let crypto = praxis_policy::compiled_crypto();
+let bundled: Vec<_> = crypto
+    .iter()
+    .filter(|dep| dep.source == praxis_policy::CryptoSource::Bundled)
+    .collect();
+```
+
+The report comes from the crates that own each dependency edge, so it reflects
+feature unification across the whole graph: a builtin enabled through another
+consumer's dependency edge is reported all the same. A FIPS startup check
+admits a report whose entries are all `SystemOpenssl` and refuses one that
+names any bundled crypto. Selecting the optional `http-hyper` transport also
+reports its bundled `ring` TLS provider.
+
+Digest compatibility is preserved: the SHA-256 and HMAC-SHA256 values are the
+same bytes the previous implementation produced, so key files, persisted
+session keys, and recorded provenance digests keep resolving.
+
 ## Related documentation
 
 - [Patterns](patterns.md): production patterns for rollout and layered

@@ -28,11 +28,11 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
-/// Error returned by a `SessionStore` when the backing store could not
-/// satisfy a request. Distributed backends (e.g. Valkey) surface
-/// connectivity/timeout/protocol failures and undecodable responses
-/// here so callers can **fail closed** rather than silently treating a
-/// backend failure as "no accumulated labels".
+/// Error returned when session state cannot safely be read or updated.
+/// Distributed backends (e.g. Valkey) surface connectivity, timeout,
+/// protocol, and decoding failures here. Request setup also uses this error
+/// when it cannot derive a session id, so callers fail closed rather than
+/// silently treating the request as sessionless.
 ///
 /// String-typed deliberately, matching the trait's own philosophy (see
 /// the module header): the error stays free of backend-specific types so
@@ -44,9 +44,8 @@ use async_trait::async_trait;
 /// backend failure is an `Err`.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionStoreError {
-    /// The backing store was unreachable, timed out, returned an error,
-    /// or returned a response that could not be decoded into the
-    /// expected representation. Callers fail closed on this.
+    /// The backing store failed, or the request's session id could not be
+    /// derived. Callers fail closed on this.
     #[error("session store backend error: {0}")]
     Backend(String),
 }

@@ -55,10 +55,11 @@ hashbrown = { workspace = true }
 # `catch_unwind` on the audit-sink future, so a panicking sink cannot unwind
 # the request whose verdict it is only observing.
 futures = { workspace = true }
-# Audit content provenance: only a keyed digest of a payload is ever recorded,
-# never the payload.
-sha2 = { workspace = true }
-hmac = { workspace = true }
+# Audit content provenance digests and `llm.input.instructions_digest`, via
+# the platform OpenSSL: only a keyed digest of a payload is ever recorded,
+# never the payload. System OpenSSL rather than RustCrypto `sha2`/`hmac` so
+# an API-key-only build carries no bundled crypto; never `vendored`.
+openssl = { workspace = true }
 arc-swap = { workspace = true }
 wildmatch = { workspace = true }
 chrono = { workspace = true }

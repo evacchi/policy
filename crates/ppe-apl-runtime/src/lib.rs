@@ -43,6 +43,8 @@ pub mod attribute_source;
 pub mod candidate_constraint;
 /// Dispatches plugin steps to one hook family's hooks.
 pub mod cmf_invoker;
+/// Compiled-crypto reporting for this crate.
+pub mod crypto;
 /// Optional bounded cache around PDP Allow/Deny decisions.
 pub mod decision_cache;
 /// Dispatches delegation steps to the delegation hook.
@@ -73,6 +75,7 @@ pub mod visitor;
 pub use attribute_source::{FileAttributeSource, merge_attribute_docs};
 pub use candidate_constraint::{ConstraintConflict, fold_candidate_constraints};
 pub use cmf_invoker::{CmfPluginInvoker, HookPluginInvoker, HttpPluginInvoker};
+pub use crypto::compiled_crypto;
 pub use decision_cache::{
     CachedPdpResolver, DecisionCacheConfig, DecisionCacheConfigError, DecisionCacheStats,
     split_cache_block,

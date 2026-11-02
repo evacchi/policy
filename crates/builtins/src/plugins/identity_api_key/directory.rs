@@ -97,6 +97,13 @@ pub enum DirectoryError {
     /// The directory answered in a shape this backend cannot read.
     #[error("directory answered unreadably: {0}")]
     Malformed(String),
+
+    /// The presented credential could not be digested for the lookup. The
+    /// authentication is refused rather than retried or treated as an
+    /// unknown credential: a digest that cannot be built is not evidence
+    /// about the key.
+    #[error("credential digest failed: {0}")]
+    Digest(String),
 }
 
 /// Where identity records live.

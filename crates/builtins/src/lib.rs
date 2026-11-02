@@ -47,5 +47,9 @@ pub mod secrets;
 #[cfg(feature = "_session")]
 pub mod session;
 
+pub mod crypto;
+
+pub use crypto::compiled_crypto;
+
 #[cfg(any(feature = "valkey", feature = "elicitation-ciba"))]
 mod env_secret;

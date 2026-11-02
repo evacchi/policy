@@ -19,6 +19,16 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Compiled-crypto capability reporting.** `praxis_policy::compiled_crypto()`
+  lists every crypto dependency the build actually compiled, each with its
+  source (`SystemOpenssl` or `Bundled`) and owner. The report is produced by
+  the crates that own each dependency edge (`praxis-policy-core`,
+  `praxis-policy-apl-runtime`, `praxis-policy-builtins`), so it reflects
+  feature unification across the graph rather than what the facade requested:
+  a builtin enabled through another consumer's edge is reported all the same.
+  A FIPS startup check admits all-`SystemOpenssl` reports and refuses any
+  bundled crypto.
+
 - **Pre- and post-identity rate-limit hooks.** `ratelimit.pre_identity` runs
   before the first `identity.resolve` and `ratelimit.post_identity` after the
   last, once per request. A `rate_limits:` list at `global`,
@@ -162,6 +172,25 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
   ([#64](https://github.com/praxis-proxy/policy/issues/64))
 
 ### Changed
+
+- **Digests now run on the platform OpenSSL.** API-key indexing and caching,
+  session-id resolution, decision-cache keys, payload provenance, and
+  instruction digests hash through dynamically linked system OpenSSL instead
+  of RustCrypto `sha2`/`hmac`, so an API-key-only selection compiles no bundled
+  crypto. Digest values are unchanged: key files, persisted session keys, and
+  recorded provenance digests keep resolving. `openssl` never enables
+  `vendored`. Consumers need an operating system OpenSSL; see the deployment
+  documentation's crypto provenance section.
+- **Digest failures fail closed where they decide security outcomes.**
+  `resolve_session` now returns `Result`, and a session id that cannot be
+  derived fails the request (`SessionStoreError::SessionId`) rather than
+  running without hydration, taint, and persistence. API-key lookups refuse
+  with `DirectoryError::Digest`. The decision cache degrades to evaluating
+  uncached; the instruction digest omits its attribute with a warning.
+- `praxis-policy-builtins` now depends on `praxis-policy-core`
+  unconditionally, so the capability report exists in every feature
+  combination. The PDP-only features still keep their apl-core-only graphs
+  apart from core itself.
 
 - A `run(name)` step whose plugin has no hook for the request's context
   fails with a `PluginError::Dispatch` message that now names the remedy:

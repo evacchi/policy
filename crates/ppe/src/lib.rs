@@ -80,6 +80,8 @@ pub use praxis_policy_apl_core::step::PdpFactory;
 pub use praxis_policy_apl_runtime::{
     AplOptions, DispatchCache, MemorySessionStore, SessionStore, SessionStoreFactory, register_apl,
 };
+/// What a host's FIPS or compliance check reads off [`compiled_crypto`].
+pub use praxis_policy_core::crypto::{CryptoDependency, CryptoSource};
 pub use praxis_policy_core::engine::PolicyEngine;
 
 /// The two types a host needs to accept a plugin it did not compile in:
@@ -298,6 +300,36 @@ pub fn install_builtins(mgr: &std::sync::Arc<PolicyEngine>) {
 #[cfg(feature = "experimental")]
 pub fn warn_experimental_features() {
     tracing::warn!("experimental features are enabled that should not be used in production");
+}
+
+/// The crypto this build's policy graph compiled with, for hosts that must
+/// know — a FIPS-mode startup check, a compliance regime, an image policy.
+///
+/// Aggregated from the crates that own each dependency edge, so the report
+/// reflects feature unification across the whole graph rather than what this
+/// facade alone requested: a builtin pulled in through another consumer's
+/// dependency edge is reported all the same. Every entry names its
+/// [`CryptoDependency::source`]; a host enforcing FIPS admits
+/// [`CryptoSource::SystemOpenssl`] and refuses [`CryptoSource::Bundled`].
+///
+/// # Examples
+///
+/// ```
+/// let crypto = praxis_policy::compiled_crypto();
+/// // The engine hashes session ids through the platform OpenSSL in every
+/// // build, so that entry is always present.
+/// assert!(crypto.iter().any(|dep| dep.name == "openssl"));
+/// ```
+pub fn compiled_crypto() -> Vec<CryptoDependency> {
+    let mut crypto = praxis_policy_core::crypto::compiled_crypto();
+    crypto.extend(praxis_policy_apl_runtime::compiled_crypto());
+    crypto.extend(praxis_policy_builtins::compiled_crypto());
+    #[cfg(feature = "http-hyper")]
+    crypto.push(CryptoDependency::bundled(
+        "ring",
+        "praxis-policy http-hyper: TLS provider",
+    ));
+    crypto
 }
 
 /// A default `HttpTransport` on hyper, for hosts that inject none.

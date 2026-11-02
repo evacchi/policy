@@ -38,11 +38,13 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-# Stable hash for tier-3 (identity-derived) session id. `DefaultHasher`
-# is explicitly documented as not-stable-across-Rust-versions; session
-# keys persist across process restarts (SessionStore), so we need an
-# algorithmically fixed hash.
-sha2 = { workspace = true }
+# SHA-256 for tier-3 (identity-derived) session ids and decision-cache keys,
+# via the platform OpenSSL. `DefaultHasher` is explicitly documented as
+# not-stable-across-Rust-versions; session keys persist across process
+# restarts (SessionStore), so we need an algorithmically fixed hash. System
+# OpenSSL rather than a RustCrypto `sha2` so a FIPS build hashes with the
+# library the host controls; never `vendored`.
+openssl = { workspace = true }
 
 [dev-dependencies]
 serde = { workspace = true }

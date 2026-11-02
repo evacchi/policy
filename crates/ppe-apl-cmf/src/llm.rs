@@ -32,10 +32,10 @@
 // OPA inputs, where dotted keys become nested maps.
 
 use praxis_policy_apl_core::AttributeBag;
+use praxis_policy_core::crypto::sha256;
 use praxis_policy_core::extensions::{
     LLMExtension, LlmInstruction, LlmInstructionRole, LlmRequestParts, ToolChoice,
 };
-use sha2::{Digest as _, Sha256};
 use std::collections::HashSet;
 
 use crate::constants::{
@@ -96,10 +96,14 @@ pub fn extract_llm_request(req: &LlmRequestParts, bag: &mut AttributeBag) {
     if let Some(v) = req.stream {
         bag.set(BAG_LLM_STREAM, v);
     }
-    bag.set(
-        BAG_LLM_INSTRUCTIONS_DIGEST,
-        instruction_digest(&req.instructions),
-    );
+    if let Some(digest) = instruction_digest(&req.instructions) {
+        bag.set(BAG_LLM_INSTRUCTIONS_DIGEST, digest);
+    } else {
+        tracing::warn!(
+            alarm = "llm.instructions_digest",
+            "instruction digest could not be derived; the attribute is omitted"
+        );
+    }
 }
 
 /// Digest of ordered instructions, including their roles and boundaries.
@@ -107,12 +111,17 @@ pub fn extract_llm_request(req: &LlmRequestParts, bag: &mut AttributeBag) {
 /// The preimage is `ppe.llm.instructions.v1\0`, a big-endian `u32` count,
 /// then for each instruction a one-byte role (`0` system, `1` developer),
 /// a big-endian `u64` byte length, and the exact UTF-8 text bytes.
-#[must_use]
-pub fn instruction_digest(instructions: &[LlmInstruction]) -> String {
-    let mut digest = Sha256::new();
-    digest.update(b"ppe.llm.instructions.v1\0");
-    digest.update(
-        u32::try_from(instructions.len())
+///
+/// `None` when the platform OpenSSL cannot hash. The caller omits the
+/// attribute rather than recording a value a pin could never match; a
+/// policy pinning the digest then fails to match, which is the fail-closed
+/// side.
+pub fn instruction_digest(instructions: &[LlmInstruction]) -> Option<String> {
+    let mut preimage =
+        Vec::with_capacity(24 + instructions.iter().map(|i| i.text.len() + 9).sum::<usize>());
+    preimage.extend_from_slice(b"ppe.llm.instructions.v1\0");
+    preimage.extend_from_slice(
+        &u32::try_from(instructions.len())
             .unwrap_or(u32::MAX)
             .to_be_bytes(),
     );
@@ -121,24 +130,21 @@ pub fn instruction_digest(instructions: &[LlmInstruction]) -> String {
             LlmInstructionRole::System => 0_u8,
             LlmInstructionRole::Developer => 1_u8,
         };
-        digest.update([role]);
-        digest.update(
-            u64::try_from(instruction.text.len())
+        preimage.push(role);
+        preimage.extend_from_slice(
+            &u64::try_from(instruction.text.len())
                 .unwrap_or(u64::MAX)
                 .to_be_bytes(),
         );
-        digest.update(instruction.text.as_bytes());
+        preimage.extend_from_slice(instruction.text.as_bytes());
     }
-    let hex: String = digest
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    format!("sha256-v1:{hex}")
+    let digest = sha256(&preimage).ok()?;
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    Some(format!("sha256-v1:{hex}"))
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "tests")]
+#[allow(clippy::expect_used, clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
     use praxis_policy_core::extensions::{Extensions, LlmRequest, ToolMetadata};
@@ -204,7 +210,11 @@ mod tests {
         assert_eq!(bag.get_bool("llm.input.stream"), Some(true));
         assert_eq!(
             bag.get_string("llm.input.instructions_digest"),
-            Some(instruction_digest(&parts.instructions).as_str())
+            Some(
+                instruction_digest(&parts.instructions)
+                    .expect("digest")
+                    .as_str()
+            )
         );
         assert!(!bag.contains("llm.offered_tools"));
     }
@@ -220,7 +230,7 @@ mod tests {
             text: text.into(),
         };
         let base = vec![system("ab"), developer("c")];
-        let digest = instruction_digest(&base);
+        let digest = instruction_digest(&base).expect("digest");
         assert!(digest.starts_with("sha256-v1:"));
         for changed in [
             vec![developer("ab"), developer("c")],
@@ -228,9 +238,13 @@ mod tests {
             vec![developer("c"), system("ab")],
             vec![system("aB"), developer("c")],
         ] {
-            assert_ne!(digest, instruction_digest(&changed));
+            assert_ne!(
+                Some(digest.clone()),
+                instruction_digest(&changed),
+                "role, boundary, order or byte changes must change the digest"
+            );
         }
-        assert_ne!(digest, instruction_digest(&[]));
+        assert_ne!(Some(digest), instruction_digest(&[]));
     }
 
     #[test]

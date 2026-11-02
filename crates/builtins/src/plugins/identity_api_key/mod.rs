@@ -64,3 +64,20 @@ pub use file_directory::{FileDirectory, FileDirectoryConfig, FileRecord, IndexKi
 pub use http_directory::{HttpDirectory, HttpDirectoryConfig};
 pub use praxis_policy_core::extensions::raw_credentials::Credential;
 pub use resolver::{ApiKeyIdentityResolver, codes};
+
+/// SHA-256 of `bytes`, via the platform OpenSSL.
+///
+/// The same digest the previous `RustCrypto` implementation produced, so key
+/// files and cache entries written by an older build keep resolving. Failures
+/// propagate to the caller and refuse the authentication; they are never
+/// folded into "unknown credential".
+pub(crate) fn sha256(bytes: &[u8]) -> Result<[u8; 32], String> {
+    let digest = openssl::hash::hash(openssl::hash::MessageDigest::sha256(), bytes)
+        .map_err(|e| format!("system OpenSSL SHA-256 failed: {e}"))?;
+    digest
+        .as_ref()
+        .try_into()
+        .map_err(|error: std::array::TryFromSliceError| {
+            format!("system OpenSSL returned a SHA-256 digest that is not 32 bytes: {error}")
+        })
+}

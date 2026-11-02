@@ -140,13 +140,21 @@ rmp-serde = "1"
 serde_bytes = "0.11"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
-# One `sha2` for the whole tree. Several crates hash for unrelated reasons
-# (audit provenance, session ids, a PKCE verifier, the system prompt digest), and `hmac` 0.13 pairs
-# with the `digest` 0.11 that this major brings. Splitting the requirement
-# would put two `sha2` and two `digest` in the build.
+# One `sha2` for the builtins still on it — the JWT plugin's DPoP thumbprints,
+# the OAuth PKCE verifier and cache keys, the Vault delegator's cache keys, the
+# Valkey key derivation — and the unpublished reference plugins. `hmac` 0.13
+# pairs with the `digest` 0.11 that one `sha2` brings. Splitting the
+# requirement would put two `sha2` and two `digest` in the build.
 sha2 = "0.11"
-# Keyed digests: audit content provenance and the OAuth cache key. Moves with
-# `sha2` above, since both have to agree on `digest`.
+# Platform OpenSSL for the digests a FIPS build must not source from bundled
+# crypto: API-key indexing and caching, session ids, and decision-cache keys.
+# Dynamically linked against the system library; `vendored` is never enabled,
+# because a statically linked OpenSSL is bundled crypto and fails the same
+# FIPS graph check that `sha2` fails.
+openssl = "0.10"
+# Keyed digests: the OAuth PKCE verifier and cache key. Moves with `sha2`
+# above, since both have to agree on `digest`. Audit content provenance
+# moved to the platform OpenSSL with the rest of the engine's digests.
 hmac = "0.13"
 # ECDSA P-256 for the OCSF audit sink's DSSE signatures. RustCrypto's `ecdsa`
 # signs per RFC 6979, so the same key and bytes always give the same

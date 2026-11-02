@@ -204,23 +204,20 @@ impl ContentKey {
     /// Digest `bytes`, prefixed with the scheme and, for a keyed digest, the
     /// key id.
     ///
-    /// `None` only if the HMAC cannot be initialized, which it accepts any key
-    /// length for. Handled rather than asserted, since a panic here would take
-    /// the request down over an audit field.
+    /// `None` when the platform OpenSSL cannot hash. Handled rather than
+    /// asserted, since a panic here would take the request down over an
+    /// audit field; the field is omitted instead, never filled with a
+    /// different value.
     #[must_use]
     pub fn digest(&self, bytes: &[u8]) -> Option<String> {
-        use hmac::{Hmac, KeyInit as _, Mac as _};
-        use sha2::{Digest as _, Sha256};
-
         match self {
-            Self::Unkeyed => Some(format!("sha256:{}", hex(&Sha256::digest(bytes)))),
+            Self::Unkeyed => Some(format!(
+                "sha256:{}",
+                hex(&crate::crypto::sha256(bytes).ok()?)
+            )),
             Self::Keyed(secret) => {
                 let key = secret.get();
-                let mac = |data: &[u8]| {
-                    let mut m = <Hmac<Sha256>>::new_from_slice(key.as_bytes()).ok()?;
-                    m.update(data);
-                    Some(m.finalize().into_bytes())
-                };
+                let mac = |data: &[u8]| crate::crypto::hmac_sha256(key.as_bytes(), data).ok();
                 let id = mac(KEY_ID_LABEL)?;
                 Some(format!(
                     "hmac-sha256:{}:{}",

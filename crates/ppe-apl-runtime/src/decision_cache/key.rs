@@ -9,7 +9,14 @@
 // mapping iteration order cannot change the digest: YAML maps, JSON
 // objects, and the bag are hashed in sorted-key order.
 
-use sha2::{Digest as _, Sha256};
+use openssl::hash::{Hasher, MessageDigest};
+
+/// The error every digest walk below propagates: the platform OpenSSL could
+/// not hash. A cache key that cannot be built means the call goes uncached,
+/// never that the decision fails or the request is served from a wrong entry.
+fn digest_failed(e: openssl::error::ErrorStack) -> String {
+    format!("system OpenSSL SHA-256 failed: {e}")
+}
 
 use praxis_policy_apl_core::attributes::{AttributeBag, AttributeValue};
 use praxis_policy_apl_core::route::StructuredInput;
@@ -26,7 +33,7 @@ impl CacheKey {
     /// caller has no request JSON. Test-only: production code goes through
     /// [`Self::for_evaluation`].
     #[cfg(test)]
-    pub(crate) fn for_call(call: &PdpCall, bag: &AttributeBag) -> Self {
+    pub(crate) fn for_call(call: &PdpCall, bag: &AttributeBag) -> Result<Self, String> {
         Self::for_evaluation(call, bag, &StructuredInput::default())
     }
 
@@ -36,26 +43,35 @@ impl CacheKey {
         call: &PdpCall,
         bag: &AttributeBag,
         structured: &StructuredInput,
-    ) -> Self {
-        let mut hasher = Sha256::new();
-        hash_dialect(&mut hasher, &call.dialect);
-        hash_yaml(&mut hasher, &call.args);
-        hash_bag(&mut hasher, bag);
-        hash_structured(&mut hasher, structured);
-        Self(hasher.finalize().into())
+    ) -> Result<Self, String> {
+        let mut hasher = Hasher::new(MessageDigest::sha256()).map_err(digest_failed)?;
+        hash_dialect(&mut hasher, &call.dialect)?;
+        hash_yaml(&mut hasher, &call.args)?;
+        hash_bag(&mut hasher, bag)?;
+        hash_structured(&mut hasher, structured)?;
+        let digest = hasher.finish().map_err(digest_failed)?;
+        Ok(Self(digest.as_ref().try_into().map_err(
+            |error: std::array::TryFromSliceError| {
+                format!("system OpenSSL returned a SHA-256 digest that is not 32 bytes: {error}")
+            },
+        )?))
     }
 }
 
-fn hash_dialect(hasher: &mut Sha256, dialect: &PdpDialect) {
+fn upd(hasher: &mut Hasher, bytes: impl AsRef<[u8]>) -> Result<(), String> {
+    hasher.update(bytes.as_ref()).map_err(digest_failed)
+}
+
+fn hash_dialect(hasher: &mut Hasher, dialect: &PdpDialect) -> Result<(), String> {
     match dialect {
-        PdpDialect::Cedar => hasher.update([0_u8]),
-        PdpDialect::Opa => hasher.update([1_u8]),
-        PdpDialect::AuthZen => hasher.update([2_u8]),
-        PdpDialect::NeMo => hasher.update([3_u8]),
-        PdpDialect::Cel => hasher.update([4_u8]),
+        PdpDialect::Cedar => upd(hasher, [0_u8])?,
+        PdpDialect::Opa => upd(hasher, [1_u8])?,
+        PdpDialect::AuthZen => upd(hasher, [2_u8])?,
+        PdpDialect::NeMo => upd(hasher, [3_u8])?,
+        PdpDialect::Cel => upd(hasher, [4_u8])?,
         PdpDialect::Custom(name) => {
-            hasher.update([5_u8]);
-            hash_bytes(hasher, name.as_bytes());
+            upd(hasher, [5_u8])?;
+            hash_bytes(hasher, name.as_bytes())?;
         },
         // `PdpDialect` is `#[non_exhaustive]` in another crate, so this
         // match needs a catch-all. Tag 255 alone would collide if two
@@ -63,193 +79,215 @@ fn hash_dialect(hasher: &mut Sha256, dialect: &PdpDialect) {
         // is the variant name, so each unknown dialect gets its own
         // digest. `Custom` is already handled above.
         other => {
-            hasher.update([255_u8]);
-            hash_bytes(hasher, format!("{other:?}").as_bytes());
+            upd(hasher, [255_u8])?;
+            hash_bytes(hasher, format!("{other:?}").as_bytes())?;
         },
     }
+    Ok(())
 }
 
-fn hash_bag(hasher: &mut Sha256, bag: &AttributeBag) {
+fn hash_bag(hasher: &mut Hasher, bag: &AttributeBag) -> Result<(), String> {
     let mut entries: Vec<(&str, &AttributeValue)> = bag.iter().collect();
     entries.sort_by(|a, b| a.0.cmp(b.0));
-    hash_len(hasher, entries.len());
+    hash_len(hasher, entries.len())?;
     for (key, value) in entries {
-        hash_bytes(hasher, key.as_bytes());
-        hash_attr(hasher, value);
+        hash_bytes(hasher, key.as_bytes())?;
+        hash_attr(hasher, value)?;
     }
+    Ok(())
 }
 
-fn hash_attr(hasher: &mut Sha256, value: &AttributeValue) {
+fn hash_attr(hasher: &mut Hasher, value: &AttributeValue) -> Result<(), String> {
     match value {
         AttributeValue::Bool(v) => {
-            hasher.update([0_u8]);
-            hasher.update([u8::from(*v)]);
+            upd(hasher, [0_u8])?;
+            upd(hasher, [u8::from(*v)])?;
         },
         AttributeValue::Int(v) => {
-            hasher.update([1_u8]);
-            hasher.update(v.to_be_bytes());
+            upd(hasher, [1_u8])?;
+            upd(hasher, v.to_be_bytes())?;
         },
         AttributeValue::Float(v) => {
-            hasher.update([2_u8]);
-            hasher.update(v.to_bits().to_be_bytes());
+            upd(hasher, [2_u8])?;
+            upd(hasher, v.to_bits().to_be_bytes())?;
         },
         AttributeValue::String(v) => {
-            hasher.update([3_u8]);
-            hash_bytes(hasher, v.as_bytes());
+            upd(hasher, [3_u8])?;
+            hash_bytes(hasher, v.as_bytes())?;
         },
         AttributeValue::StringSet(set) => {
-            hasher.update([4_u8]);
+            upd(hasher, [4_u8])?;
             let mut members: Vec<&str> = set.iter().map(String::as_str).collect();
             members.sort_unstable();
-            hash_len(hasher, members.len());
+            hash_len(hasher, members.len())?;
             for member in members {
-                hash_bytes(hasher, member.as_bytes());
+                hash_bytes(hasher, member.as_bytes())?;
             }
         },
-        AttributeValue::NonScalar => hasher.update([5_u8]),
+        AttributeValue::NonScalar => upd(hasher, [5_u8])?,
     }
+    Ok(())
 }
 
-fn hash_yaml(hasher: &mut Sha256, value: &serde_yaml::Value) {
+fn hash_yaml(hasher: &mut Hasher, value: &serde_yaml::Value) -> Result<(), String> {
     match value {
-        serde_yaml::Value::Null => hasher.update([0_u8]),
+        serde_yaml::Value::Null => upd(hasher, [0_u8])?,
         serde_yaml::Value::Bool(v) => {
-            hasher.update([1_u8]);
-            hasher.update([u8::from(*v)]);
+            upd(hasher, [1_u8])?;
+            upd(hasher, [u8::from(*v)])?;
         },
         serde_yaml::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                hasher.update([2_u8]);
-                hasher.update(i.to_be_bytes());
+                upd(hasher, [2_u8])?;
+                upd(hasher, i.to_be_bytes())?;
             } else if let Some(u) = n.as_u64() {
-                hasher.update([3_u8]);
-                hasher.update(u.to_be_bytes());
+                upd(hasher, [3_u8])?;
+                upd(hasher, u.to_be_bytes())?;
             } else if let Some(f) = n.as_f64() {
-                hasher.update([4_u8]);
-                hasher.update(f.to_bits().to_be_bytes());
+                upd(hasher, [4_u8])?;
+                upd(hasher, f.to_bits().to_be_bytes())?;
             } else {
-                hasher.update([5_u8]);
+                upd(hasher, [5_u8])?;
             }
         },
         serde_yaml::Value::String(s) => {
-            hasher.update([6_u8]);
-            hash_bytes(hasher, s.as_bytes());
+            upd(hasher, [6_u8])?;
+            hash_bytes(hasher, s.as_bytes())?;
         },
         serde_yaml::Value::Sequence(seq) => {
-            hasher.update([7_u8]);
-            hash_len(hasher, seq.len());
+            upd(hasher, [7_u8])?;
+            hash_len(hasher, seq.len())?;
             for item in seq {
-                hash_yaml(hasher, item);
+                hash_yaml(hasher, item)?;
             }
         },
         serde_yaml::Value::Mapping(map) => {
-            hasher.update([8_u8]);
-            let mut pairs: Vec<(Vec<u8>, &serde_yaml::Value)> = map
-                .iter()
-                .map(|(k, v)| (canonical_yaml_bytes(k), v))
-                .collect();
+            upd(hasher, [8_u8])?;
+            let mut pairs: Vec<(Vec<u8>, &serde_yaml::Value)> = Vec::with_capacity(map.len());
+            for (key, val) in map {
+                pairs.push((canonical_yaml_bytes(key)?, val));
+            }
             pairs.sort_by(|a, b| a.0.cmp(&b.0));
-            hash_len(hasher, pairs.len());
+            hash_len(hasher, pairs.len())?;
             for (key_bytes, val) in pairs {
-                hash_bytes(hasher, &key_bytes);
-                hash_yaml(hasher, val);
+                hash_bytes(hasher, &key_bytes)?;
+                hash_yaml(hasher, val)?;
             }
         },
         serde_yaml::Value::Tagged(tagged) => {
-            hasher.update([9_u8]);
-            hash_bytes(hasher, tagged.tag.to_string().as_bytes());
-            hash_yaml(hasher, &tagged.value);
+            upd(hasher, [9_u8])?;
+            hash_bytes(hasher, tagged.tag.to_string().as_bytes())?;
+            hash_yaml(hasher, &tagged.value)?;
         },
     }
+    Ok(())
 }
 
-fn canonical_yaml_bytes(value: &serde_yaml::Value) -> Vec<u8> {
-    let mut hasher = Sha256::new();
-    hash_yaml(&mut hasher, value);
-    hasher.finalize().to_vec()
+fn canonical_yaml_bytes(value: &serde_yaml::Value) -> Result<Vec<u8>, String> {
+    let mut hasher = Hasher::new(MessageDigest::sha256()).map_err(digest_failed)?;
+    hash_yaml(&mut hasher, value)?;
+    let digest = hasher.finish().map_err(digest_failed)?;
+    Ok(digest.to_vec())
 }
 
-fn hash_structured(hasher: &mut Sha256, structured: &StructuredInput) {
-    hasher.update([u8::from(structured.too_deep())]);
+fn hash_structured(hasher: &mut Hasher, structured: &StructuredInput) -> Result<(), String> {
+    upd(hasher, [u8::from(structured.too_deep())])?;
     hash_optional_json(
         hasher,
         structured.llm_request().map(std::convert::AsRef::as_ref),
-    );
-    hash_optional_json(hasher, structured.args().map(std::convert::AsRef::as_ref));
+    )?;
+    hash_optional_json(hasher, structured.args().map(std::convert::AsRef::as_ref))?;
+    Ok(())
 }
 
-fn hash_optional_json(hasher: &mut Sha256, value: Option<&serde_json::Value>) {
+fn hash_optional_json(
+    hasher: &mut Hasher,
+    value: Option<&serde_json::Value>,
+) -> Result<(), String> {
     match value {
-        None => hasher.update([0_u8]),
+        None => upd(hasher, [0_u8])?,
         Some(value) => {
-            hasher.update([1_u8]);
-            hash_json(hasher, value);
+            upd(hasher, [1_u8])?;
+            hash_json(hasher, value)?;
         },
     }
+    Ok(())
 }
 
-fn hash_json(hasher: &mut Sha256, value: &serde_json::Value) {
+fn hash_json(hasher: &mut Hasher, value: &serde_json::Value) -> Result<(), String> {
     match value {
-        serde_json::Value::Null => hasher.update([0_u8]),
+        serde_json::Value::Null => upd(hasher, [0_u8])?,
         serde_json::Value::Bool(v) => {
-            hasher.update([1_u8]);
-            hasher.update([u8::from(*v)]);
+            upd(hasher, [1_u8])?;
+            upd(hasher, [u8::from(*v)])?;
         },
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                hasher.update([2_u8]);
-                hasher.update(i.to_be_bytes());
+                upd(hasher, [2_u8])?;
+                upd(hasher, i.to_be_bytes())?;
             } else if let Some(u) = n.as_u64() {
-                hasher.update([3_u8]);
-                hasher.update(u.to_be_bytes());
+                upd(hasher, [3_u8])?;
+                upd(hasher, u.to_be_bytes())?;
             } else if let Some(f) = n.as_f64() {
-                hasher.update([4_u8]);
-                hasher.update(f.to_bits().to_be_bytes());
+                upd(hasher, [4_u8])?;
+                upd(hasher, f.to_bits().to_be_bytes())?;
             } else {
-                hasher.update([5_u8]);
+                upd(hasher, [5_u8])?;
             }
         },
         serde_json::Value::String(s) => {
-            hasher.update([6_u8]);
-            hash_bytes(hasher, s.as_bytes());
+            upd(hasher, [6_u8])?;
+            hash_bytes(hasher, s.as_bytes())?;
         },
         serde_json::Value::Array(items) => {
-            hasher.update([7_u8]);
-            hash_len(hasher, items.len());
+            upd(hasher, [7_u8])?;
+            hash_len(hasher, items.len())?;
             for item in items {
-                hash_json(hasher, item);
+                hash_json(hasher, item)?;
             }
         },
         serde_json::Value::Object(map) => {
-            hasher.update([8_u8]);
+            upd(hasher, [8_u8])?;
             let mut pairs: Vec<(&str, &serde_json::Value)> =
                 map.iter().map(|(key, val)| (key.as_str(), val)).collect();
             pairs.sort_by(|left, right| left.0.cmp(right.0));
-            hash_len(hasher, pairs.len());
+            hash_len(hasher, pairs.len())?;
             for (key, val) in pairs {
-                hash_bytes(hasher, key.as_bytes());
-                hash_json(hasher, val);
+                hash_bytes(hasher, key.as_bytes())?;
+                hash_json(hasher, val)?;
             }
         },
     }
+    Ok(())
 }
 
-fn hash_bytes(hasher: &mut Sha256, bytes: &[u8]) {
-    hash_len(hasher, bytes.len());
-    hasher.update(bytes);
+fn hash_bytes(hasher: &mut Hasher, bytes: &[u8]) -> Result<(), String> {
+    hash_len(hasher, bytes.len())?;
+    upd(hasher, bytes)?;
+    Ok(())
 }
 
-fn hash_len(hasher: &mut Sha256, len: usize) {
-    hasher.update(u64::try_from(len).unwrap_or(u64::MAX).to_be_bytes());
+fn hash_len(hasher: &mut Hasher, len: usize) -> Result<(), String> {
+    upd(hasher, u64::try_from(len).unwrap_or(u64::MAX).to_be_bytes())?;
+    Ok(())
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "tests")]
+#[expect(clippy::unwrap_used, clippy::expect_used, reason = "tests")]
 mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
 
     use super::*;
+
+    // The infallible shapes the tests were written against.
+    fn key_for_call(call: &PdpCall, bag: &AttributeBag) -> CacheKey {
+        CacheKey::for_call(call, bag).expect("digest")
+    }
+
+    fn key_for_eval(call: &PdpCall, bag: &AttributeBag, structured: &StructuredInput) -> CacheKey {
+        CacheKey::for_evaluation(call, bag, structured).expect("digest")
+    }
 
     fn call_with_map(alpha_first: bool) -> PdpCall {
         let yaml = if alpha_first {
@@ -267,8 +305,8 @@ mod tests {
     #[test]
     fn map_iteration_order_does_not_change_the_digest() {
         let bag = AttributeBag::new();
-        let a = CacheKey::for_call(&call_with_map(true), &bag);
-        let b = CacheKey::for_call(&call_with_map(false), &bag);
+        let a = key_for_call(&call_with_map(true), &bag);
+        let b = key_for_call(&call_with_map(false), &bag);
         assert_eq!(a, b);
     }
 
@@ -284,10 +322,7 @@ mod tests {
         let mut right = AttributeBag::new();
         right.set("a", "2");
         right.set("z", "1");
-        assert_eq!(
-            CacheKey::for_call(&call, &left),
-            CacheKey::for_call(&call, &right)
-        );
+        assert_eq!(key_for_call(&call, &left), key_for_call(&call, &right));
     }
 
     #[test]
@@ -306,10 +341,7 @@ mod tests {
             "session.labels",
             HashSet::from(["hr".to_owned(), "pii".to_owned()]),
         );
-        assert_eq!(
-            CacheKey::for_call(&call, &left),
-            CacheKey::for_call(&call, &right)
-        );
+        assert_eq!(key_for_call(&call, &left), key_for_call(&call, &right));
     }
 
     #[test]
@@ -325,16 +357,10 @@ mod tests {
             dialect: PdpDialect::Opa,
             args,
         };
-        assert_ne!(
-            CacheKey::for_call(&cel, &bag),
-            CacheKey::for_call(&opa, &bag)
-        );
+        assert_ne!(key_for_call(&cel, &bag), key_for_call(&opa, &bag));
         let mut other = bag.clone();
         other.set("subject.id", "bob");
-        assert_ne!(
-            CacheKey::for_call(&cel, &bag),
-            CacheKey::for_call(&cel, &other)
-        );
+        assert_ne!(key_for_call(&cel, &bag), key_for_call(&cel, &other));
     }
 
     #[test]
@@ -349,7 +375,7 @@ mod tests {
             dialect: PdpDialect::Custom("guard".into()),
             args,
         };
-        assert_ne!(CacheKey::for_call(&a, &bag), CacheKey::for_call(&b, &bag));
+        assert_ne!(key_for_call(&a, &bag), key_for_call(&b, &bag));
     }
 
     #[test]
@@ -365,7 +391,7 @@ mod tests {
             dialect: PdpDialect::Cel,
             args: plain,
         };
-        assert_ne!(CacheKey::for_call(&a, &bag), CacheKey::for_call(&b, &bag));
+        assert_ne!(key_for_call(&a, &bag), key_for_call(&b, &bag));
     }
 
     #[test]
@@ -375,13 +401,13 @@ mod tests {
             args: serde_yaml::Value::Null,
         };
         let bag = AttributeBag::new();
-        let empty = CacheKey::for_call(&call, &bag);
-        let with_args = CacheKey::for_evaluation(
+        let empty = key_for_call(&call, &bag);
+        let with_args = key_for_eval(
             &call,
             &bag,
             &StructuredInput::new(None, Some(Arc::new(serde_json::json!({"z": 1, "a": 2})))),
         );
-        let reordered = CacheKey::for_evaluation(
+        let reordered = key_for_eval(
             &call,
             &bag,
             &StructuredInput::new(None, Some(Arc::new(serde_json::json!({"a": 2, "z": 1})))),

@@ -44,7 +44,8 @@ use std::time::Instant;
 
 use praxis_policy_core::host::HostServices;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
+
+use super::sha256;
 
 use crate::plugins::identity_api_key::directory::{
     DirectoryError, KeyDirectory, KeyRecord, PresentedKey,
@@ -183,8 +184,8 @@ impl CachingDirectory {
     /// can read the heap, for as long as the entry lives. Hashing costs one
     /// SHA-256 per lookup and removes that entirely. It is also what makes the
     /// entry safe to count, log and size.
-    fn key_of(presented: &PresentedKey) -> [u8; 32] {
-        Sha256::digest(presented.as_bytes()).into()
+    fn key_of(presented: &PresentedKey) -> Result<[u8; 32], DirectoryError> {
+        sha256(presented.as_bytes()).map_err(DirectoryError::Digest)
     }
 
     /// A live entry for `key`, if there is one.
@@ -232,7 +233,7 @@ impl KeyDirectory for CachingDirectory {
         presented: &PresentedKey,
         services: &dyn HostServices,
     ) -> Result<Option<KeyRecord>, DirectoryError> {
-        let key = Self::key_of(presented);
+        let key = Self::key_of(presented)?;
         let now = self.now_ms();
 
         if let Some(entry) = Self::get(&self.hits, &key, now) {

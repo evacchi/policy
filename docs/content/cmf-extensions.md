@@ -505,7 +505,7 @@ A plugin needs `read_llm_request` to read the carrier and its bag keys.
 | `llm.input.temperature` | Float | `Some` |
 | `llm.input.top_p` | Float | `Some` |
 | `llm.input.stream` | Bool | `Some` |
-| `llm.input.instructions_digest` | String | always when parts reported, `sha256-v1:<hex>` |
+| `llm.input.instructions_digest` | String | when parts reported, `sha256-v1:<hex>`; omitted, with a warning, only if the digest could not be derived |
 
 With no normalized parts, none of these keys is written. A reported empty
 tool list writes an empty set. Instruction text and tool schemas stay off the

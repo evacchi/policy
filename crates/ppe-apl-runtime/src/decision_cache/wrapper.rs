@@ -181,7 +181,20 @@ impl PdpResolver for CachedPdpResolver {
         bag: &AttributeBag,
         structured: &StructuredInput,
     ) -> Result<PdpDecision, PdpError> {
-        let key = CacheKey::for_evaluation(call, bag, structured);
+        // The cache is an optimization, not a decision input. A digest that
+        // cannot be built means this call goes uncached — never that the
+        // decision fails, and never that a wrong entry is consulted.
+        let key = match CacheKey::for_evaluation(call, bag, structured) {
+            Ok(key) => key,
+            Err(error) => {
+                tracing::warn!(
+                    alarm = "pdp_decision_cache",
+                    %error,
+                    "PDP decision cache key could not be derived; evaluating uncached"
+                );
+                return self.inner.evaluate_structured(call, bag, structured).await;
+            },
+        };
         let (lookup, generation) = self.lookup(&key);
         match lookup {
             Lookup::Hit(decision) => {
@@ -312,7 +325,7 @@ mod tests {
             config(),
             Arc::downgrade(&mgr),
         );
-        let key = CacheKey::for_call(&call(), &AttributeBag::default());
+        let key = CacheKey::for_call(&call(), &AttributeBag::default()).expect("digest");
         let (lookup, old_generation) = cache.lookup(&key);
         assert!(matches!(lookup, Lookup::Miss));
 

@@ -24,8 +24,9 @@ serde_json = { workspace = true }
 # Only to render `WorkloadIdentity.attested_at` in a canonical, orderable form.
 # The typed value is core's; the formatting choice is the bridge's.
 chrono = { workspace = true }
-# `llm.input.instructions_digest`.
-sha2 = { workspace = true }
+# `llm.input.instructions_digest` is taken from core's platform-OpenSSL
+# digest; no crypto dependency of this crate's own.
+tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

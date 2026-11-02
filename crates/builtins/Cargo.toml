@@ -27,7 +27,7 @@ default = []
 # forward and a rename is a lockstep two-file edit rather than a translation
 # table nobody maintains.
 jwt = ["_engine-core", "_plugins", "dep:jsonwebtoken", "dep:base64", "dep:sha2"]
-api-key = ["_engine-core", "_plugins", "dep:sha2"]
+api-key = ["_engine-core", "_plugins", "dep:openssl"]
 oauth = [
   "_engine-core",
   "_plugins",
@@ -68,7 +68,7 @@ secrets-vault = ["_engine-core", "_secrets"]
 
 # Private upstream-edge markers. Each engine dependency is named in exactly one
 # place, so changing how an edge is declared is a one-line edit rather than five.
-_engine-core = ["dep:praxis-policy-core"]
+_engine-core = []
 _engine-apl-core = ["dep:praxis-policy-apl-core"]
 _engine-apl-cmf = ["dep:praxis-policy-apl-cmf"]
 _engine-apl-runtime = ["dep:praxis-policy-apl-runtime"]
@@ -83,10 +83,19 @@ _session = []
 _secrets = []
 
 [dependencies]
-# Engine crates, optional so a consumer resolves only the layer it asked for.
-# The three PDPs must stay apl-core-only on their normal edges: a non-optional
-# `apl-runtime` here would silently hand a Cedar-only consumer the runtime.
-praxis-policy-core = { workspace = true, optional = true }
+# Engine crates, optional so a consumer resolves only the layer it asked
+# for. The three PDPs must stay apl-core-only on their normal edges: a
+# non-optional `apl-runtime` here would silently hand a Cedar-only consumer
+# the runtime.
+#
+# `praxis-policy-core` is the exception, and deliberately so: the
+# compiled-crypto report (`crypto.rs`) must exist in every feature
+# combination, because a host's FIPS check cannot depend on which builtins
+# happened to compile, and the report type lives in core. Every feature
+# already resolves core directly or through the runtime it enables, except
+# the PDPs — for them this adds core without the runtime, which is the part
+# the optionality above exists to keep out.
+praxis-policy-core = { workspace = true }
 praxis-policy-apl-core = { workspace = true, optional = true }
 praxis-policy-apl-cmf = { workspace = true, optional = true }
 praxis-policy-apl-runtime = { workspace = true, optional = true }
@@ -142,12 +151,20 @@ base64 = { workspace = true, optional = true }
 
 # --- api-key, oauth, valkey --------------------------------------------------
 
-# `sha2` for the API-key hash index (keys compared by digest, never plaintext),
-# the OAuth cache-key HMAC, and the Valkey key derivation.
+# `sha2` for the OAuth cache-key HMAC, the Vault delegator's cache keys, and
+# the Valkey key derivation. The API-key hash index moved to the platform
+# `openssl` below, so a FIPS build can select API-key support without any
+# bundled crypto; the features still on `sha2` are excluded from that build.
 #
 # 0.13 `hmac` below pairs with the `digest` 0.11 that the workspace `sha2`
 # brings, so a bump to either has to move both.
 sha2 = { workspace = true, optional = true }
+
+# The API-key hash index and cache keys: keys compared by digest, never
+# plaintext. Platform OpenSSL, dynamically linked — `vendored` is never
+# enabled, because a statically linked OpenSSL is bundled crypto and fails
+# the same FIPS graph check that `sha2` fails.
+openssl = { workspace = true, optional = true }
 
 # --- oauth -------------------------------------------------------------------
 

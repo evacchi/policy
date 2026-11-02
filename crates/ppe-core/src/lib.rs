@@ -45,6 +45,8 @@ pub mod cmf;
 pub mod config;
 /// Per-plugin state carried across hook invocations.
 pub mod context;
+/// What crypto a compiled policy build contains, for hosts that must know.
+pub mod crypto;
 /// What each plugin did to a request, and how the pipeline ruled on it.
 pub mod decision;
 /// The token delegation hook and its payload.
